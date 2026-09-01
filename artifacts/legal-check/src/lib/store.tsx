@@ -140,11 +140,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateExtraction = (data: ExtractedData) => {
-    if (currentInspection) {
-      setCurrentInspection({ ...currentInspection, extractedData: data });
-    }
-  };
+const updateExtraction = (data: ExtractedData) => {
+  setCurrentInspection((inspection) => {
+    if (!inspection) return inspection;
+
+    return {
+      ...inspection,
+      extractedData: data,
+      status: "in_progress",
+    };
+  });
+};
 
   const runComplianceCheck = () => {
     if (!currentInspection) return;
