@@ -29,3 +29,5 @@ jobs:
 
       - name: Build Legal Check
         run: pnpm --filter @workspace/legal-check build
+        env:
+          PORT: 5000
