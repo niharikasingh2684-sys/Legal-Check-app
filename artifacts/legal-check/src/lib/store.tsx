@@ -144,8 +144,15 @@ const updateExtraction = (data: ExtractedData) => {
   setCurrentInspection((inspection) => {
     if (!inspection) return inspection;
 
+    const genericNameMatch = data.other.match(/generic\s*name\s*:\s*([^|]+)/i);
+    const detectedProductName = genericNameMatch?.[1]?.trim();
+
     return {
       ...inspection,
+      productName:
+        inspection.productName === "Unknown Product" && detectedProductName
+          ? detectedProductName
+          : inspection.productName,
       extractedData: data,
       status: "in_progress",
     };
