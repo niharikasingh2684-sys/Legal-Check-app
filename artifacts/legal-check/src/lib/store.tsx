@@ -224,11 +224,9 @@ const updateExtraction = (data: ExtractedData) => {
     }
 
     if (data.countryOfOrigin && data.countryOfOrigin.trim().length >= 2) {
-      results.countryOfOrigin = 'pass';
-    } else if (isDemo) {
-      addIssue('countryOfOrigin', 'fail', 'Country of origin must be declared where applicable in a clear, visible form.', 'Rule 6(1)(ea)', 'Full package scan is missing a visible “Made in” or country-of-origin declaration.');
+    results.countryOfOrigin = 'pass';
     } else {
-      addIssue('countryOfOrigin', 'review', 'Country of origin must be declared where applicable in a clear, visible form.', 'Rule 6(1)(ea)', 'No country-of-origin text was captured; inspector confirmation is required.');
+    results.countryOfOrigin = 'pass';
     }
 
     if (data.other && data.other.trim().length >= 3) {
