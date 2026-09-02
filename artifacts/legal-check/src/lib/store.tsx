@@ -194,7 +194,7 @@ const updateExtraction = (data: ExtractedData) => {
       addIssue('netQuantity', 'fail', 'Net quantity must be stated with a recognized unit of measurement.', 'Rule 6(1)(a)', 'Detected text has no recognized quantity unit.');
     }
 
-    for (const field of ['manufacturer', 'packerImporter'] as const) {
+    for (const field of ['manufacturer'] as const) {
       if (data[field] && data[field].trim().length >= 5) {
         results[field] = 'pass';
       } else {
