@@ -36,19 +36,15 @@ function clean(value = "") {
     .trim();
 }
 
-function cleanLine(value = "") {
+function cleanStart(value = "") {
   return clean(value.replace(/^[\s:;.,\-–—]+/, ""));
 }
 
 function findFirst(text: string, patterns: RegExp[]) {
   for (const pattern of patterns) {
     const match = text.match(pattern);
-
-    if (match?.[1]) {
-      return cleanLine(match[1]);
-    }
+    if (match?.[1]) return cleanStart(match[1]);
   }
-
   return "";
 }
 
@@ -60,20 +56,27 @@ function getLines(text: string) {
     .filter(Boolean);
 }
 
-function findLineValue(lines: string[], keywords: RegExp[]) {
-  for (const line of lines) {
-    for (const keyword of keywords) {
-      if (keyword.test(line)) {
-        const parts = line.split(/[:\-]/);
+function removeTrailingGarbage(value: string) {
+  return clean(
+    value
+      .replace(/\s+(?:he|hc|h[eoc]|[=|])\s*[=|]?\s*$/i, "")
+      .replace(/\s+[=|]+\s*$/g, "")
+  );
+}
 
-        if (parts.length > 1) {
-          const value = cleanLine(parts.slice(1).join(" "));
-          if (value) return value;
-        }
+function validIndianPhone(value: string) {
+  const digits = value.replace(/\D/g, "");
 
-        return line;
-      }
-    }
+  if (digits.length === 10 && /^[6-9]/.test(digits)) {
+    return digits;
+  }
+
+  if (
+    digits.length === 12 &&
+    digits.startsWith("91") &&
+    /^[6-9]/.test(digits.substring(2))
+  ) {
+    return `+91 ${digits.substring(2)}`;
   }
 
   return "";
@@ -83,34 +86,20 @@ export function extractDeclarations(text: string): ExtractedData {
   const normalized = text.replace(/\r/g, "");
   const lines = getLines(normalized);
 
-  // -----------------------------
   // MRP
-  // -----------------------------
   let mrp = findFirst(normalized, [
-    /(?:M\.?\s*R\.?\s*P\.?|MRP|maximum\s+retail\s+price)[^\n₹\d]{0,20}(₹?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*\([^)\n]*tax[^)\n]*\))?)/i,
-
-    /(?:M\.?\s*R\.?\s*P\.?|MRP)[^\n]{0,30}?(₹\s*\d[\d,]*(?:\.\d{1,2})?)/i,
-
-    /₹\s*(\d[\d,]*(?:\.\d{1,2})?)/i,
+    /(?:M\.?\s*R\.?\s*P\.?|MRP|maximum\s+retail\s+price)[^\n₹\d]{0,25}(₹?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*\([^)\n]*tax[^)\n]*\))?)/i,
+    /(?:M\.?\s*R\.?\s*P\.?|MRP)[^\n]{0,35}?(₹\s*\d[\d,]*(?:\.\d{1,2})?)/i,
   ]);
 
-  if (mrp && !/[₹Rr]/.test(mrp)) {
+  if (mrp && !mrp.includes("₹")) {
     mrp = `₹ ${mrp}`;
   }
 
-  // -----------------------------
-  // NET QUANTITY
-  // Require an actual quantity unit.
-  // This prevents Article No. values
-  // such as 22G-896 being treated as quantity.
-  // -----------------------------
-  const quantityPatterns = [
+  // Net quantity
+  let netQuantity = findFirst(normalized, [
     /(?:net\s*(?:qty|quantity|weight|content)|nett?\s*(?:wt|weight))\s*[:.\-]?\s*(\d+(?:[.,]\d+)?\s*(?:kg|kgs|g|gm|gms|gram|grams|ml|mL|l|litre|liter|litres|liters|pcs|pieces|pair|pairs|units?)\b)/i,
-
-    /(?:net\s*(?:qty|quantity))\s*[:.\-]?\s*([^\n]{1,40})/i,
-  ];
-
-  let netQuantity = findFirst(normalized, quantityPatterns);
+  ]);
 
   if (
     netQuantity &&
@@ -121,78 +110,85 @@ export function extractDeclarations(text: string): ExtractedData {
     netQuantity = "";
   }
 
-  // -----------------------------
-  // MANUFACTURER
-  // -----------------------------
-  let manufacturer = findFirst(normalized, [
-    /(?:manufactured\s*by|manufacturer|mfd\.?\s*by)\s*[:.\-]?\s*([^\n]{3,160})/i,
-  ]);
+  // Manufacturer
+  let manufacturer = "";
 
-  if (!manufacturer) {
-    manufacturer = findLineValue(lines, [
-      /manufactured\s*by/i,
-      /\bmanufacturer\b/i,
-    ]);
+  for (let i = 0; i < lines.length; i++) {
+    if (/manufactured\s*by|manufacturer|mfd\.?\s*by/i.test(lines[i])) {
+      const match = lines[i].match(
+        /(?:manufactured\s*by|manufacturer|mfd\.?\s*by)\s*[:.\-]?\s*(.*)/i
+      );
+
+      if (match?.[1]) {
+        manufacturer = removeTrailingGarbage(match[1]);
+      }
+
+      if (!manufacturer && lines[i + 1]) {
+        manufacturer = removeTrailingGarbage(lines[i + 1]);
+      }
+
+      break;
+    }
   }
 
-  // Remove common OCR garbage from beginning.
-  manufacturer = cleanLine(
-    manufacturer.replace(/^(?:by\s*)?[:\-–—]+\s*/i, "")
-  );
+  // Packer / Importer
+  let packerImporter = "";
 
-  // -----------------------------
-  // PACKER / IMPORTER
-  // -----------------------------
-  let packerImporter = findFirst(normalized, [
-    /(?:packed\s*by|packer|imported\s*by|importer)\s*[:.\-]?\s*([^\n]{3,160})/i,
-  ]);
+  for (let i = 0; i < lines.length; i++) {
+    if (/packed\s*by|\bpacker\b|imported\s*by|\bimporter\b/i.test(lines[i])) {
+      const match = lines[i].match(
+        /(?:packed\s*by|packer|imported\s*by|importer)\s*[:.\-]?\s*(.*)/i
+      );
 
-  if (!packerImporter) {
-    packerImporter = findLineValue(lines, [
-      /packed\s*by/i,
-      /\bpacker\b/i,
-      /imported\s*by/i,
-      /\bimporter\b/i,
-    ]);
+      if (match?.[1]) {
+        packerImporter = removeTrailingGarbage(match[1]);
+      }
+
+      if (!packerImporter && lines[i + 1]) {
+        packerImporter = removeTrailingGarbage(lines[i + 1]);
+      }
+
+      break;
+    }
   }
 
-  // -----------------------------
-  // MONTH / YEAR
-  // -----------------------------
+  // Month / year
   const monthYear = findFirst(normalized, [
     /(?:manufactured\s*on|manufacturing\s*date|mfg\.?\s*(?:date|on)?|mfd\.?\s*(?:date|on)?|packed\s*on|packing\s*date|pkd\.?\s*(?:date|on)?)\s*[:.\-]?\s*((?:0?[1-9]|1[0-2])[\/\-](?:20)?\d{2})/i,
-
     /(?:manufactured\s*on|mfg\.?|mfd\.?|packed\s*on|pkd\.?)[^\n]{0,20}((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[\s,\/\-]+20\d{2})/i,
   ]);
 
-  // -----------------------------
-  // CONSUMER CARE
-  // Prefer actual phone/email/contact
-  // information and explicitly avoid UID.
-  // -----------------------------
+  // Consumer care
   let consumerCare = "";
 
-  const consumerLineIndex = lines.findIndex((line) =>
-    /consumer\s*(?:complaint|care|feedback)|customer\s*care|contact\s*(?:customer|us)|complaint/i.test(
+  const contactStart = lines.findIndex((line) =>
+    /consumer\s*(?:complaint|care|feedback)|customer\s*care|contact\s*(?:customer|us)|complaint|feedback/i.test(
       line
     )
   );
 
-  if (consumerLineIndex >= 0) {
+  if (contactStart >= 0) {
     const context = lines
-      .slice(
-        consumerLineIndex,
-        Math.min(lines.length, consumerLineIndex + 3)
-      )
+      .slice(contactStart, Math.min(lines.length, contactStart + 4))
       .join(" ");
 
-    const email = context.match(
-      /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
-    )?.[0];
+    const emails =
+      context.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) || [];
 
-    const phone = context.match(
-      /(?:\+91[\s-]?)?[6-9]\d{9}\b/
-    )?.[0];
+    const numberCandidates =
+      context.match(/(?:\+91[\s-]?)?[6-9][\d\s-]{8,14}\d/g) || [];
+
+    let phone = "";
+
+    for (const candidate of numberCandidates) {
+      const checked = validIndianPhone(candidate);
+      if (checked) {
+        phone = checked;
+        break;
+      }
+    }
+
+    const email = emails[0] || "";
 
     if (phone && email) {
       consumerCare = `Tel: ${phone} / Email: ${email}`;
@@ -200,19 +196,36 @@ export function extractDeclarations(text: string): ExtractedData {
       consumerCare = `Tel: ${phone}`;
     } else if (email) {
       consumerCare = `Email: ${email}`;
-    } else {
-      consumerCare = clean(context);
     }
   }
 
+  // If the contact section was badly segmented by OCR,
+  // search the complete text, but never use UID/barcode values.
   if (!consumerCare) {
-    const email = normalized.match(
-      /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
-    )?.[0];
+    const email =
+      normalized.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/)?.[0] || "";
 
-    const phone = normalized.match(
-      /(?:\+91[\s-]?)?[6-9]\d{9}\b/
-    )?.[0];
+    const candidates =
+      normalized.match(/(?:\+91[\s-]?)?[6-9][\d\s-]{8,14}\d/g) || [];
+
+    let phone = "";
+
+    for (const candidate of candidates) {
+      const nearbyIndex = normalized.indexOf(candidate);
+      const nearby = normalized.slice(
+        Math.max(0, nearbyIndex - 30),
+        nearbyIndex + candidate.length + 30
+      );
+
+      if (/UID|barcode/i.test(nearby)) continue;
+
+      const checked = validIndianPhone(candidate);
+
+      if (checked) {
+        phone = checked;
+        break;
+      }
+    }
 
     if (phone && email) {
       consumerCare = `Tel: ${phone} / Email: ${email}`;
@@ -223,51 +236,60 @@ export function extractDeclarations(text: string): ExtractedData {
     }
   }
 
-  // Never accept a UID/barcode number as consumer care.
-  if (/^\s*(?:UID|U1D)[\s:\-]*\d+/i.test(consumerCare)) {
-    consumerCare = "";
-  }
-
-  // -----------------------------
-  // COUNTRY OF ORIGIN
-  // Only populate when explicitly printed.
-  // Never guess India from an Indian address.
-  // -----------------------------
+  // Country of origin:
+  // only record it when the label explicitly states it.
   const countryOfOrigin = findFirst(normalized, [
-    /country\s*of\s*origin\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,40})/i,
-    /(?:made\s*in|product\s*of)\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,40})/i,
+    /country\s*of\s*origin\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,30})/i,
+    /(?:made\s*in|product\s*of)\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,30})/i,
   ]);
 
-  // -----------------------------
-  // OTHER USEFUL DECLARATIONS
-  // -----------------------------
-  const otherCandidates: string[] = [];
+  // Other declarations
+  const otherParts: string[] = [];
 
-  const genericName = findFirst(normalized, [
-    /generic\s*name\s*[:.\-]?\s*([^\n]{2,80})/i,
+  let genericName = findFirst(normalized, [
+    /generic\s*name\s*[:.\-]?\s*([^\n]{2,60})/i,
   ]);
 
-  const article = findFirst(normalized, [
-    /article\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,60})/i,
+  // Stop generic-name extraction before another known declaration.
+  genericName = genericName
+    .split(
+      /\s+(?=net\s*(?:qty|quantity)|article\s*(?:no|number)|batch\s*(?:no|number)|m\.?r\.?p\.?|manufactured\s*by)/i
+    )[0]
+    .trim();
+
+  let article = findFirst(normalized, [
+    /article\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,50})/i,
   ]);
 
-  const batch = findFirst(normalized, [
-    /batch\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,60})/i,
+  article = article
+    .split(
+      /\s+(?=colour|color|m\.?r\.?p\.?|batch|generic\s*name|net\s*(?:qty|quantity))/i
+    )[0]
+    .trim();
+
+  let batch = findFirst(normalized, [
+    /batch\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,50})/i,
   ]);
+
+  batch = batch
+    .split(
+      /\s+(?=generic\s*name|net\s*(?:qty|quantity)|manufactured|m\.?r\.?p\.?)/i
+    )[0]
+    .trim();
 
   if (genericName) {
-    otherCandidates.push(`Generic Name: ${genericName}`);
+    otherParts.push(`Generic Name: ${genericName}`);
   }
 
   if (article) {
-    otherCandidates.push(`Article No.: ${article}`);
+    otherParts.push(`Article No.: ${article}`);
   }
 
   if (batch) {
-    otherCandidates.push(`Batch No.: ${batch}`);
+    otherParts.push(`Batch No.: ${batch}`);
   }
 
-  const other = otherCandidates.join(" | ");
+  const other = otherParts.join(" | ");
 
   return {
     mrp,
