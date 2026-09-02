@@ -104,7 +104,7 @@ export default function ResultsPage() {
                   {FIELD_LABELS[key]}
                 </div>
                 <div className={`text-sm ${!value ? 'text-muted-foreground italic' : 'text-foreground'}`}>
-                  {value || (key === 'countryOfOrigin' ? 'Not applicable / Domestic product' : '(Not declared)')}
+                  {value || (key === 'countryOfOrigin' ? 'Not detected — verify applicability' : '(Not declared)')}
                 </div>
                 <div className="text-center">
                   {getResultBadge(result)}
