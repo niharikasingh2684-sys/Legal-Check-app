@@ -13,20 +13,6 @@ async function loadTesseract() {
   if (window.Tesseract) return window.Tesseract;
 
   await new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector(
-      `script[src="${TESSERACT_URL}"]`
-    ) as HTMLScriptElement | null;
-
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener(
-        "error",
-        () => reject(new Error("OCR engine could not be loaded.")),
-        { once: true }
-      );
-      return;
-    }
-
     const script = document.createElement("script");
     script.src = TESSERACT_URL;
     script.async = true;
@@ -45,15 +31,13 @@ async function loadTesseract() {
 
 function clean(value = "") {
   return value
-    .replace(/[|]/g, "I")
+    .replace(/[|]/g, " ")
     .replace(/\s+/g, " ")
-    .replace(/^[\s:;,.=-]+/, "")
-    .replace(/[\s:;,.=-]+$/, "")
     .trim();
 }
 
 function cleanLine(value = "") {
-  return value.replace(/\s+/g, " ").trim();
+  return clean(value.replace(/^[\s:;.,\-–—]+/, ""));
 }
 
 function findFirst(text: string, patterns: RegExp[]) {
@@ -61,7 +45,7 @@ function findFirst(text: string, patterns: RegExp[]) {
     const match = text.match(pattern);
 
     if (match?.[1]) {
-      return clean(match[1]);
+      return cleanLine(match[1]);
     }
   }
 
@@ -72,210 +56,25 @@ function getLines(text: string) {
   return text
     .replace(/\r/g, "")
     .split("\n")
-    .map(cleanLine)
+    .map(clean)
     .filter(Boolean);
 }
 
-function findLabelLine(
-  lines: string[],
-  labels: RegExp[],
-  maxFollowingLines = 1
-) {
-  for (let i = 0; i < lines.length; i++) {
-    if (!labels.some((label) => label.test(lines[i]))) continue;
-
-    const current = lines[i];
-
-    const afterColon = current.match(/[:.-]\s*(.+)$/);
-
-    if (afterColon?.[1] && clean(afterColon[1]).length >= 2) {
-      return clean(afterColon[1]);
-    }
-
-    for (
-      let offset = 1;
-      offset <= maxFollowingLines && i + offset < lines.length;
-      offset++
-    ) {
-      const candidate = clean(lines[i + offset]);
-
-      if (candidate.length >= 2) return candidate;
-    }
-  }
-
-  return "";
-}
-
-function extractMrp(text: string, lines: string[]) {
-  const labelled = findFirst(text, [
-    /(?:M\.?\s*R\.?\s*P\.?|MRP|maximum\s+retail\s+price)\s*(?:₹|Rs\.?|INR)?\s*[:=.-]?\s*((?:₹|Rs\.?|INR)?\s*\d[\d,\s]*(?:\.\d{1,2})?)/i,
-
-    /(?:M\.?\s*R\.?\s*P\.?|MRP|maximum\s+retail\s+price)[^\n]{0,25}?((?:₹|Rs\.?|INR)\s*\d[\d,]*(?:\.\d{1,2})?)/i,
-  ]);
-
-  if (labelled) {
-    return labelled.startsWith("₹") ||
-      /^Rs/i.test(labelled) ||
-      /^INR/i.test(labelled)
-      ? labelled
-      : `₹ ${labelled}`;
-  }
-
+function findLineValue(lines: string[], keywords: RegExp[]) {
   for (const line of lines) {
-    if (!/(?:MRP|M\.?\s*R\.?\s*P\.?|maximum retail price)/i.test(line)) {
-      continue;
-    }
+    for (const keyword of keywords) {
+      if (keyword.test(line)) {
+        const parts = line.split(/[:\-]/);
 
-    const amount = line.match(
-      /(?:₹|Rs\.?|INR)\s*(\d[\d,]*(?:\.\d{1,2})?)/
-    );
+        if (parts.length > 1) {
+          const value = cleanLine(parts.slice(1).join(" "));
+          if (value) return value;
+        }
 
-    if (amount?.[1]) return `₹ ${amount[1]}`;
-  }
-
-  return "";
-}
-
-function extractNetQuantity(text: string, lines: string[]) {
-  const labelled = findFirst(text, [
-    /(?:net\s*(?:qty|quantity|weight|wt|content|contents))\s*[:=.-]?\s*((?:\d+(?:[.,]\d+)?)\s*(?:kg|kgs|g|gm|gms|gram|grams|ml|l|litre|liter|litres|liters|pcs?|pieces?|pairs?|units?))/i,
-
-    /(?:net\s*(?:qty|quantity))\s*[:=.-]?\s*((?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(?:pair|pairs|piece|pieces|pc|pcs|unit|units))/i,
-  ]);
-
-  if (labelled) return labelled;
-
-  for (const line of lines) {
-    if (!/net\s*(?:qty|quantity|weight|wt|content)/i.test(line)) {
-      continue;
-    }
-
-    const value = line.match(
-      /(?:net\s*(?:qty|quantity|weight|wt|content))\s*[:=.-]?\s*(.+)$/i
-    );
-
-    if (value?.[1]) {
-      const cleaned = clean(value[1]);
-
-      if (
-        /\b(?:kg|kgs|g|gm|gms|gram|grams|ml|litre|liter|pair|pairs|piece|pieces|pc|pcs|unit|units)\b/i.test(
-          cleaned
-        )
-      ) {
-        return cleaned;
+        return line;
       }
     }
   }
-
-  return "";
-}
-
-function extractManufacturer(text: string, lines: string[]) {
-  const direct = findFirst(text, [
-    /(?:manufactured\s+by|manufacturer|mfd\.?\s*by)\s*[:=.-]?\s*([^\n]{3,140})/i,
-  ]);
-
-  if (direct) return direct;
-
-  return findLabelLine(
-    lines,
-    [/manufactured\s+by/i, /\bmanufacturer\b/i, /mfd\.?\s*by/i],
-    1
-  );
-}
-
-function extractPackerImporter(text: string, lines: string[]) {
-  const direct = findFirst(text, [
-    /(?:packed\s+by|packer|imported\s+by|importer)\s*[:=.-]?\s*([^\n]{3,140})/i,
-  ]);
-
-  if (direct) return direct;
-
-  return findLabelLine(
-    lines,
-    [/packed\s+by/i, /\bpacker\b/i, /imported\s+by/i, /\bimporter\b/i],
-    1
-  );
-}
-
-function extractMonthYear(text: string) {
-  return findFirst(text, [
-    /(?:manufactured\s+on|manufactured|mfg\.?|mfd\.?|packed\s+on|packed|pkd\.?|packing\s+date)\s*[:=.-]?\s*((?:0?[1-9]|1[0-2])[/-](?:20)?\d{2})/i,
-
-    /(?:manufactured\s+on|manufactured|mfg\.?|mfd\.?|packed\s+on|packed|pkd\.?)\s*[:=.-]?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[\s,/-]+20\d{2})/i,
-  ]);
-}
-
-function extractConsumerCare(text: string, lines: string[]) {
-  const emailMatch = text.match(
-    /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
-  );
-
-  const phoneMatches =
-    text.match(
-      /(?:\+91[-\s]?)?(?:[6-9]\d{9}|0\d{2,4}[-\s]?\d{6,8})/g
-    ) || [];
-
-  const careLines = lines.filter((line) =>
-    /consumer|customer\s*care|complaint|feedback|helpline|contact\s*us/i.test(
-      line
-    )
-  );
-
-  const careText = careLines.join(" ");
-
-  const carePhone =
-    careText.match(
-      /(?:\+91[-\s]?)?(?:[6-9]\d{9}|0\d{2,4}[-\s]?\d{6,8})/
-    )?.[0] || "";
-
-  const phone = carePhone || phoneMatches[0] || "";
-  const email = emailMatch?.[0] || "";
-
-  if (phone && email) return `${phone} / ${email}`;
-  if (phone) return phone;
-  if (email) return email;
-
-  const labelled = findLabelLine(
-    lines,
-    [
-      /consumer\s*(?:care|complaint)/i,
-      /customer\s*care/i,
-      /complaint/i,
-      /feedback/i,
-      /helpline/i,
-    ],
-    1
-  );
-
-  return labelled;
-}
-
-function extractCountryOfOrigin(text: string) {
-  return findFirst(text, [
-    /(?:country\s+of\s+origin)\s*[:=.-]?\s*([A-Za-z][A-Za-z ]{1,35})/i,
-    /(?:made\s+in|product\s+of)\s*[:=.-]?\s*([A-Za-z][A-Za-z ]{1,35})/i,
-  ]);
-}
-
-function extractOther(lines: string[]) {
-  const genericName = lines.find((line) =>
-    /generic\s+name/i.test(line)
-  );
-
-  if (genericName) {
-    const match = genericName.match(
-      /generic\s+name\s*[:=.-]?\s*(.+)$/i
-    );
-
-    if (match?.[1]) return clean(match[1]);
-  }
-
-  const article = lines.find((line) =>
-    /\barticle\s*:/i.test(line)
-  );
-
-  if (article) return clean(article);
 
   return "";
 }
@@ -284,22 +83,201 @@ export function extractDeclarations(text: string): ExtractedData {
   const normalized = text.replace(/\r/g, "");
   const lines = getLines(normalized);
 
+  // -----------------------------
+  // MRP
+  // -----------------------------
+  let mrp = findFirst(normalized, [
+    /(?:M\.?\s*R\.?\s*P\.?|MRP|maximum\s+retail\s+price)[^\n₹\d]{0,20}(₹?\s*\d[\d,]*(?:\.\d{1,2})?(?:\s*\([^)\n]*tax[^)\n]*\))?)/i,
+
+    /(?:M\.?\s*R\.?\s*P\.?|MRP)[^\n]{0,30}?(₹\s*\d[\d,]*(?:\.\d{1,2})?)/i,
+
+    /₹\s*(\d[\d,]*(?:\.\d{1,2})?)/i,
+  ]);
+
+  if (mrp && !/[₹Rr]/.test(mrp)) {
+    mrp = `₹ ${mrp}`;
+  }
+
+  // -----------------------------
+  // NET QUANTITY
+  // Require an actual quantity unit.
+  // This prevents Article No. values
+  // such as 22G-896 being treated as quantity.
+  // -----------------------------
+  const quantityPatterns = [
+    /(?:net\s*(?:qty|quantity|weight|content)|nett?\s*(?:wt|weight))\s*[:.\-]?\s*(\d+(?:[.,]\d+)?\s*(?:kg|kgs|g|gm|gms|gram|grams|ml|mL|l|litre|liter|litres|liters|pcs|pieces|pair|pairs|units?)\b)/i,
+
+    /(?:net\s*(?:qty|quantity))\s*[:.\-]?\s*([^\n]{1,40})/i,
+  ];
+
+  let netQuantity = findFirst(normalized, quantityPatterns);
+
+  if (
+    netQuantity &&
+    !/\b(?:kg|kgs|g|gm|gms|gram|grams|ml|l|litre|liter|litres|liters|pcs|pieces|pair|pairs|units?)\b/i.test(
+      netQuantity
+    )
+  ) {
+    netQuantity = "";
+  }
+
+  // -----------------------------
+  // MANUFACTURER
+  // -----------------------------
+  let manufacturer = findFirst(normalized, [
+    /(?:manufactured\s*by|manufacturer|mfd\.?\s*by)\s*[:.\-]?\s*([^\n]{3,160})/i,
+  ]);
+
+  if (!manufacturer) {
+    manufacturer = findLineValue(lines, [
+      /manufactured\s*by/i,
+      /\bmanufacturer\b/i,
+    ]);
+  }
+
+  // Remove common OCR garbage from beginning.
+  manufacturer = cleanLine(
+    manufacturer.replace(/^(?:by\s*)?[:\-–—]+\s*/i, "")
+  );
+
+  // -----------------------------
+  // PACKER / IMPORTER
+  // -----------------------------
+  let packerImporter = findFirst(normalized, [
+    /(?:packed\s*by|packer|imported\s*by|importer)\s*[:.\-]?\s*([^\n]{3,160})/i,
+  ]);
+
+  if (!packerImporter) {
+    packerImporter = findLineValue(lines, [
+      /packed\s*by/i,
+      /\bpacker\b/i,
+      /imported\s*by/i,
+      /\bimporter\b/i,
+    ]);
+  }
+
+  // -----------------------------
+  // MONTH / YEAR
+  // -----------------------------
+  const monthYear = findFirst(normalized, [
+    /(?:manufactured\s*on|manufacturing\s*date|mfg\.?\s*(?:date|on)?|mfd\.?\s*(?:date|on)?|packed\s*on|packing\s*date|pkd\.?\s*(?:date|on)?)\s*[:.\-]?\s*((?:0?[1-9]|1[0-2])[\/\-](?:20)?\d{2})/i,
+
+    /(?:manufactured\s*on|mfg\.?|mfd\.?|packed\s*on|pkd\.?)[^\n]{0,20}((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*[\s,\/\-]+20\d{2})/i,
+  ]);
+
+  // -----------------------------
+  // CONSUMER CARE
+  // Prefer actual phone/email/contact
+  // information and explicitly avoid UID.
+  // -----------------------------
+  let consumerCare = "";
+
+  const consumerLineIndex = lines.findIndex((line) =>
+    /consumer\s*(?:complaint|care|feedback)|customer\s*care|contact\s*(?:customer|us)|complaint/i.test(
+      line
+    )
+  );
+
+  if (consumerLineIndex >= 0) {
+    const context = lines
+      .slice(
+        consumerLineIndex,
+        Math.min(lines.length, consumerLineIndex + 3)
+      )
+      .join(" ");
+
+    const email = context.match(
+      /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
+    )?.[0];
+
+    const phone = context.match(
+      /(?:\+91[\s-]?)?[6-9]\d{9}\b/
+    )?.[0];
+
+    if (phone && email) {
+      consumerCare = `Tel: ${phone} / Email: ${email}`;
+    } else if (phone) {
+      consumerCare = `Tel: ${phone}`;
+    } else if (email) {
+      consumerCare = `Email: ${email}`;
+    } else {
+      consumerCare = clean(context);
+    }
+  }
+
+  if (!consumerCare) {
+    const email = normalized.match(
+      /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/
+    )?.[0];
+
+    const phone = normalized.match(
+      /(?:\+91[\s-]?)?[6-9]\d{9}\b/
+    )?.[0];
+
+    if (phone && email) {
+      consumerCare = `Tel: ${phone} / Email: ${email}`;
+    } else if (phone) {
+      consumerCare = `Tel: ${phone}`;
+    } else if (email) {
+      consumerCare = `Email: ${email}`;
+    }
+  }
+
+  // Never accept a UID/barcode number as consumer care.
+  if (/^\s*(?:UID|U1D)[\s:\-]*\d+/i.test(consumerCare)) {
+    consumerCare = "";
+  }
+
+  // -----------------------------
+  // COUNTRY OF ORIGIN
+  // Only populate when explicitly printed.
+  // Never guess India from an Indian address.
+  // -----------------------------
+  const countryOfOrigin = findFirst(normalized, [
+    /country\s*of\s*origin\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,40})/i,
+    /(?:made\s*in|product\s*of)\s*[:.\-]?\s*([A-Za-z][A-Za-z ]{1,40})/i,
+  ]);
+
+  // -----------------------------
+  // OTHER USEFUL DECLARATIONS
+  // -----------------------------
+  const otherCandidates: string[] = [];
+
+  const genericName = findFirst(normalized, [
+    /generic\s*name\s*[:.\-]?\s*([^\n]{2,80})/i,
+  ]);
+
+  const article = findFirst(normalized, [
+    /article\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,60})/i,
+  ]);
+
+  const batch = findFirst(normalized, [
+    /batch\s*(?:no\.?|number)?\s*[:.\-]?\s*([^\n]{2,60})/i,
+  ]);
+
+  if (genericName) {
+    otherCandidates.push(`Generic Name: ${genericName}`);
+  }
+
+  if (article) {
+    otherCandidates.push(`Article No.: ${article}`);
+  }
+
+  if (batch) {
+    otherCandidates.push(`Batch No.: ${batch}`);
+  }
+
+  const other = otherCandidates.join(" | ");
+
   return {
-    mrp: extractMrp(normalized, lines),
-
-    netQuantity: extractNetQuantity(normalized, lines),
-
-    manufacturer: extractManufacturer(normalized, lines),
-
-    packerImporter: extractPackerImporter(normalized, lines),
-
-    monthYear: extractMonthYear(normalized),
-
-    consumerCare: extractConsumerCare(normalized, lines),
-
-    countryOfOrigin: extractCountryOfOrigin(normalized),
-
-    other: extractOther(lines),
+    mrp,
+    netQuantity,
+    manufacturer,
+    packerImporter,
+    monthYear,
+    consumerCare,
+    countryOfOrigin,
+    other,
   };
 }
 
