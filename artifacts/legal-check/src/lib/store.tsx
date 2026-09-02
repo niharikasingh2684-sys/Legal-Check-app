@@ -186,7 +186,7 @@ const updateExtraction = (data: ExtractedData) => {
       addIssue('mrp', 'fail', 'Maximum Retail Price must be declared with a currency marker and value.', 'Rule 6(1)(e)', 'Detected text does not contain a clear MRP currency/value pair.');
     }
 
-    if (data.netQuantity && /\d/.test(data.netQuantity) && /(g|kg|ml|l|litre|liter)\b/i.test(data.netQuantity)) {
+    if (data.netQuantity && /\d/.test(data.netQuantity) && /\b(g|gm|gms|kg|ml|l|litre|liter|litres|liters|piece|pieces|pc|pcs|pair|pairs|unit|units)\b/i.test(data.netQuantity)) {
       results.netQuantity = 'pass';
     } else if (!data.netQuantity) {
       addIssue('netQuantity', 'review', 'Net quantity must be stated with a recognized unit of measurement.', 'Rule 6(1)(a)', 'No net quantity value was captured by OCR.');
