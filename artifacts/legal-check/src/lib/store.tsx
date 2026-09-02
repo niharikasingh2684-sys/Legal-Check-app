@@ -224,17 +224,16 @@ const updateExtraction = (data: ExtractedData) => {
     }
 
     if (data.countryOfOrigin && data.countryOfOrigin.trim().length >= 2) {
-    results.countryOfOrigin = 'pass';
+      results.countryOfOrigin = 'pass';
     } else {
-    results.countryOfOrigin = 'pass';
+      addIssue(
+        'countryOfOrigin',
+        'review',
+        'Country of origin was not detected. Verify whether this declaration is applicable to the product.',
+        'Applicability requires inspector verification.',
+        'No country of origin detected by OCR.'
+      );
     }
-
-    if (data.other && data.other.trim().length >= 3) {
-      results.other = 'pass';
-    } else {
-      addIssue('other', 'review', 'Other mandatory declarations should be visible and legible on the package.', 'Rule 6', 'No additional declaration text was captured by OCR.');
-    }
-
     const status: InspectionStatus = Object.values(results).includes('fail')
       ? 'violations_flagged'
       : Object.values(results).includes('review')
