@@ -156,7 +156,7 @@ const updateExtraction = (data: ExtractedData) => {
     if (!currentInspection) return;
 
     const data = currentInspection.extractedData;
-    const isDemo = currentInspection.source === 'demo' || currentInspection.productName.includes("Saffola");
+    const isDemo = currentInspection.source === "demo";
     const results = {} as Record<keyof ExtractedData, FieldResult>;
     const violations: Violation[] = [];
 
